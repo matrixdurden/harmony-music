@@ -10,7 +10,7 @@ class StreamProvider {
 
   static Future<StreamProvider> fetch(String videoId) async {
     final yt = YoutubeExplode();
-    
+
     try {
       final res = await yt.videos.streamsClient.getManifest(videoId);
       final audio = res.audioOnly;
@@ -23,8 +23,10 @@ class StreamProvider {
                   audioCodec:
                       e.audioCodec.contains('mp') ? Codec.mp4a : Codec.opus,
                   bitrate: e.bitrate.bitsPerSecond,
-                  duration: e.duration ?? 0,
-                  loudnessDb: e.loudnessDb,
+                  // youtube_explode 3.x no longer exposes these values on
+                  // AudioOnlyStreamInfo. The player resolves duration itself.
+                  duration: 0,
+                  loudnessDb: 0.0,
                   url: e.url.toString(),
                   size: e.size.totalBytes))
               .toList());
@@ -37,7 +39,7 @@ class StreamProvider {
       } else if (e is VideoUnplayableException) {
         return StreamProvider(
           playable: false,
-          statusMSG: e.reason ?? "Song is unplayable",
+          statusMSG: e.toString(),
         );
       } else if (e is VideoRequiresPurchaseException) {
         return StreamProvider(
@@ -57,9 +59,11 @@ class StreamProvider {
       } else {
         return StreamProvider(
           playable: false,
-          statusMSG: "Unknown error occurred",
+          statusMSG: "Unknown error occurred: $e",
         );
       }
+    } finally {
+      yt.close();
     }
   }
 
