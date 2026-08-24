@@ -64,7 +64,6 @@ class ThemeController extends GetxController {
     if (songId == currentSongId) return;
     PaletteGenerator generator = await PaletteGenerator.fromImageProvider(
         ResizeImage(imageProvider, height: 200, width: 200));
-    //final colorList = generator.colors;
     final paletteColor = generator.dominantColor ??
         generator.darkMutedColor ??
         generator.darkVibrantColor ??
@@ -72,7 +71,6 @@ class ThemeController extends GetxController {
         generator.lightVibrantColor;
     primaryColor.value = paletteColor!.color;
     textColor.value = paletteColor.bodyTextColor;
-    // printINFO(paletteColor.color.computeLuminance().toString());0.11 ref
     if (paletteColor.color.computeLuminance() > 0.10) {
       primaryColor.value = paletteColor.color.withLightness(0.10);
       textColor.value = Colors.white54;
@@ -108,14 +106,11 @@ class ThemeController extends GetxController {
               brightness: Brightness.dark,
               backgroundColor: primarySwatch[700],
               primarySwatch: primarySwatch),
-          //accentColor: primarySwatch[200],
           dialogBackgroundColor: primarySwatch[700],
           cardColor: primarySwatch[600],
           primaryColorLight: primarySwatch[400],
           primaryColorDark: primarySwatch[700],
-          //secondaryHeaderColor: primarySwatch[50],
           canvasColor: primarySwatch[700],
-          //scaffoldBackgroundColor: primarySwatch[700],
           bottomSheetTheme: BottomSheetThemeData(
               backgroundColor: primarySwatch[600],
               modalBarrierColor: primarySwatch[400]),
@@ -163,9 +158,7 @@ class ThemeController extends GetxController {
           textSelectionTheme: TextSelectionThemeData(
               cursorColor: primarySwatch[200],
               selectionColor: primarySwatch[200],
-              selectionHandleColor: primarySwatch[200])
-          //scaffoldBackgroundColor: primarySwatch[700]
-          );
+              selectionHandleColor: primarySwatch[200]));
       return baseTheme.copyWith(
           textTheme: GoogleFonts.interTextTheme(baseTheme.textTheme));
     } else if (themeType == ThemeType.dark) {
@@ -221,11 +214,8 @@ class ThemeController extends GetxController {
           bottomSheetTheme: const BottomSheetThemeData(
               backgroundColor: Colors.black, modalBarrierColor: Colors.black),
           sliderTheme: const SliderThemeData(
-            //base bar color
             inactiveTrackColor: Colors.white30,
-            //buffered progress
             activeTrackColor: Colors.white,
-            //progress bar color
             valueIndicatorColor: Colors.black38,
             thumbColor: Colors.white,
           ),
@@ -292,11 +282,8 @@ class ThemeController extends GetxController {
           bottomSheetTheme: const BottomSheetThemeData(
               backgroundColor: Colors.white, modalBarrierColor: Colors.white),
           sliderTheme: SliderThemeData(
-            //base bar color
             inactiveTrackColor: Colors.black38,
-            //buffered progress
             activeTrackColor: Colors.grey[800],
-            //progress bar color
             valueIndicatorColor: Colors.white38,
             thumbColor: Colors.grey[800],
           ),
@@ -304,7 +291,7 @@ class ThemeController extends GetxController {
               cursorColor: Colors.grey[400],
               selectionColor: Colors.grey[400],
               selectionHandleColor: Colors.grey[400]),
-          dialogTheme: DialogTheme(backgroundColor: Colors.grey[200]),
+          dialogTheme: DialogThemeData(backgroundColor: Colors.grey[200]),
           inputDecorationTheme: const InputDecorationTheme(
               focusColor: Colors.black,
               focusedBorder: UnderlineInputBorder(
