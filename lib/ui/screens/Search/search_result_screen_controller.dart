@@ -121,7 +121,12 @@ class SearchResultScreenController extends GetxController
     final args = Get.arguments;
     if (args != null) {
       queryString.value = args;
-      resultContent.value = await musicServices.search(args);
+      try {
+        resultContent.value = await musicServices.search(args);
+      } catch (e) {
+        printINFO("Default search failed, using filtered fallback: $e");
+        resultContent.clear();
+      }
 
       const expectedKeys = [
         "Songs",
@@ -157,8 +162,7 @@ class SearchResultScreenController extends GetxController
           fallbackFilters.entries.map((entry) async {
             try {
               final x = await musicServices.search(args,
-                  filter: entry.value,
-                  limit: entry.key == 'Songs' || entry.key == 'Videos' ? 3 : 3);
+                  filter: entry.value, limit: 10);
               final resultKey = x.containsKey(entry.key)
                   ? entry.key
                   : x.keys.firstWhere(
@@ -188,8 +192,8 @@ class SearchResultScreenController extends GetxController
         resultContent.value = fallbackResult;
       }
 
-      final allKeys = resultContent.keys.where((element) => (expectedKeys)
-          .contains(element));
+      final allKeys =
+          resultContent.keys.where((element) => expectedKeys.contains(element));
       railItems.value = List<String>.from(allKeys);
       final len =
           railItems.where((element) => element.contains("playlists")).length;
