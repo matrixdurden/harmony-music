@@ -52,17 +52,32 @@ class SearchResultScreenController extends GetxController
             separatedResultContent[railItems[value - 1]].isEmpty)) {
       final tabName = railItems[value - 1];
       final itemCount = (tabName == 'Songs' || tabName == 'Videos') ? 25 : 10;
+      final searchEndpoints = resultContent['searchEndpoint'];
+      final rawFilterParams =
+          searchEndpoints is Map ? searchEndpoints[tabName] : null;
+      final filterParams = rawFilterParams is String ? rawFilterParams : null;
       final x = await musicServices.search(queryString.value,
-          filter: tabName.replaceAll(" ", "_").toLowerCase(), limit: itemCount, filterParams: resultContent['searchEndpoint'][tabName]);
-      separatedResultContent[tabName] = x[tabName];
+          filter: tabName.replaceAll(" ", "_").toLowerCase(),
+          limit: itemCount,
+          filterParams: filterParams);
+      final resultKey = x.containsKey(tabName)
+          ? tabName
+          : x.keys.firstWhere(
+              (key) => key != 'params' && key != 'searchEndpoint',
+              orElse: () => tabName,
+            );
+      separatedResultContent[tabName] = x[resultKey] ?? [];
       additionalParamNext[tabName] = x['params'];
       isSeparatedResultContentFetced.value = true;
       final scrollController = scrollControllers[tabName];
       (scrollController)!.addListener(() {
         double maxScroll = scrollController.position.maxScrollExtent;
         double currentScroll = scrollController.position.pixels;
+        final nextParams = additionalParamNext[tabName];
         if (currentScroll >= maxScroll / 2 &&
-            additionalParamNext[tabName]['additionalParams'] !=
+            nextParams != null &&
+            nextParams['additionalParams'] != null &&
+            nextParams['additionalParams'] !=
                 '&ctoken=null&continuation=null') {
           if (!continuationInProgress) {
             printINFO("Acchhsk");
@@ -77,10 +92,20 @@ class SearchResultScreenController extends GetxController
 
   Future<void> getContinuationContents() async {
     final tabName = railItems[navigationRailCurrentIndex.value - 1];
+    final params = additionalParamNext[tabName];
+    if (params == null) {
+      continuationInProgress = false;
+      return;
+    }
 
-    final x =
-        await musicServices.getSearchContinuation(additionalParamNext[tabName]);
-    (separatedResultContent[tabName]).addAll(x[tabName]);
+    final x = await musicServices.getSearchContinuation(params);
+    final resultKey = x.containsKey(tabName)
+        ? tabName
+        : x.keys.firstWhere(
+            (key) => key != 'params' && key != 'searchEndpoint',
+            orElse: () => tabName,
+          );
+    (separatedResultContent[tabName]).addAll(x[resultKey] ?? []);
     additionalParamNext[tabName] = x['params'];
     separatedResultContent.refresh();
 
@@ -97,14 +122,74 @@ class SearchResultScreenController extends GetxController
     if (args != null) {
       queryString.value = args;
       resultContent.value = await musicServices.search(args);
-      final allKeys = resultContent.keys.where((element) => ([
-            "Songs",
-            "Videos",
-            "Albums",
-            "Featured playlists",
-            "Community playlists",
-            "Artists"
-          ]).contains(element));
+
+      const expectedKeys = [
+        "Songs",
+        "Videos",
+        "Albums",
+        "Featured playlists",
+        "Community playlists",
+        "Artists"
+      ];
+
+      final hasSearchResults = expectedKeys.any((key) {
+        final value = resultContent[key];
+        return value is List && value.isNotEmpty;
+      });
+
+      // YouTube Music started returning default search results inside
+      // itemSectionRenderer in 2026. The legacy parser treats that response as
+      // empty. Filtered search still uses the supported musicShelfRenderer
+      // shape, so fall back to category searches when the default result is
+      // empty. This also keeps older server responses working unchanged.
+      if (!hasSearchResults) {
+        const fallbackFilters = <String, String>{
+          "Songs": "songs",
+          "Videos": "videos",
+          "Albums": "albums",
+          "Featured playlists": "featured_playlists",
+          "Community playlists": "community_playlists",
+          "Artists": "artists",
+        };
+
+        final previousSearchEndpoints = resultContent['searchEndpoint'];
+        final fallbackEntries = await Future.wait(
+          fallbackFilters.entries.map((entry) async {
+            try {
+              final x = await musicServices.search(args,
+                  filter: entry.value,
+                  limit: entry.key == 'Songs' || entry.key == 'Videos' ? 3 : 3);
+              final resultKey = x.containsKey(entry.key)
+                  ? entry.key
+                  : x.keys.firstWhere(
+                      (key) => key != 'params' && key != 'searchEndpoint',
+                      orElse: () => entry.key,
+                    );
+              final items = x[resultKey];
+              return MapEntry<String, dynamic>(
+                  entry.key, items is List ? items : <dynamic>[]);
+            } catch (e) {
+              printINFO("Search fallback failed for ${entry.key}: $e");
+              return MapEntry<String, dynamic>(entry.key, <dynamic>[]);
+            }
+          }),
+        );
+
+        final fallbackResult = <String, dynamic>{};
+        if (previousSearchEndpoints is Map &&
+            previousSearchEndpoints.isNotEmpty) {
+          fallbackResult['searchEndpoint'] = previousSearchEndpoints;
+        }
+        for (final entry in fallbackEntries) {
+          if (entry.value is List && (entry.value as List).isNotEmpty) {
+            fallbackResult[entry.key] = entry.value;
+          }
+        }
+        resultContent.value = fallbackResult;
+      }
+
+      final allKeys = resultContent.keys.where((element) => (expectedKeys)
+          .contains(element));
       railItems.value = List<String>.from(allKeys);
       final len =
           railItems.where((element) => element.contains("playlists")).length;
