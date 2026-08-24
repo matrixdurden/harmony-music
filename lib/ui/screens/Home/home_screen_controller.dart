@@ -85,6 +85,62 @@ class HomeScreenController extends GetxController {
     }
   }
 
+  List<dynamic> _firstSearchList(Map<String, dynamic> result) {
+    for (final entry in result.entries) {
+      if (entry.key == 'params' || entry.key == 'searchEndpoint') {
+        continue;
+      }
+      if (entry.value is List) {
+        return List<dynamic>.from(entry.value as List);
+      }
+    }
+    return [];
+  }
+
+  /// Fallback for YouTube Music home-layout changes.
+  ///
+  /// The browse/home response changes more often than filtered search. If a new
+  /// renderer breaks the legacy home parser, keep the app usable by building a
+  /// lightweight home screen from the still-supported filtered search shelves.
+  Future<bool> _loadFallbackHome() async {
+    try {
+      final results = await Future.wait([
+        _musicServices.search('music', filter: 'songs', limit: 20),
+        _musicServices.search('music', filter: 'albums', limit: 10),
+        _musicServices.search('music', filter: 'playlists', limit: 10),
+      ]);
+
+      final songs = _firstSearchList(results[0]).whereType<MediaItem>().toList();
+      final albums = _firstSearchList(results[1]).whereType<Album>().toList();
+      final playlists =
+          _firstSearchList(results[2]).whereType<Playlist>().toList();
+
+      if (songs.isEmpty) {
+        return false;
+      }
+
+      quickPicks.value = QuickPicks(songs, title: 'Quick picks');
+      middleContent.clear();
+
+      final fallbackContent = <dynamic>[];
+      if (albums.length >= 2) {
+        fallbackContent.add(AlbumContent(albumList: albums, title: 'Albums'));
+      }
+      if (playlists.length >= 2) {
+        fallbackContent.add(
+            PlaylistContent(playlistList: playlists, title: 'Playlists'));
+      }
+      fixedContent.value = fallbackContent;
+      isContentFetched.value = true;
+      networkError.value = false;
+      printINFO('Loaded fallback home content');
+      return true;
+    } catch (e) {
+      printERROR('Fallback home content failed: $e');
+      return false;
+    }
+  }
+
   Future<void> loadContentFromNetwork({bool silent = false}) async {
     final box = Hive.box("AppPrefs");
     String contentType = box.get("discoverContentType") ?? "QP";
@@ -95,6 +151,12 @@ class HomeScreenController extends GetxController {
       final homeContentListMap = await _musicServices.getHome(
           limit:
               Get.find<SettingsScreenController>().noOfHomeScreenContent.value);
+
+      if (homeContentListMap.isEmpty) {
+        if (await _loadFallbackHome()) return;
+        throw StateError('YouTube Music home response was empty');
+      }
+
       if (contentType == "TR") {
         final index = homeContentListMap
             .indexWhere((element) => element['title'] == "Trending");
@@ -153,6 +215,12 @@ class HomeScreenController extends GetxController {
       if (quickPicks.value.songList.isEmpty) {
         final index = homeContentListMap
             .indexWhere((element) => element['title'] == "Quick picks");
+        if (index < 0 ||
+            homeContentListMap[index]['contents'] == null ||
+            (homeContentListMap[index]['contents'] as List).isEmpty) {
+          if (await _loadFallbackHome()) return;
+          throw StateError('Quick picks shelf is missing');
+        }
         final con = homeContentListMap.removeAt(index);
         quickPicks.value = QuickPicks(List<MediaItem>.from(con["contents"]),
             title: "Quick picks");
@@ -167,11 +235,13 @@ class HomeScreenController extends GetxController {
       cachedHomeScreenData(updateAll: true);
       await Hive.box("AppPrefs")
           .put("homeScreenDataTime", DateTime.now().millisecondsSinceEpoch);
-      // ignore: unused_catch_stack
-    } on NetworkError catch (r, e) {
-      printERROR("Home Content not loaded due to ${r.message}");
-      await Future.delayed(const Duration(seconds: 1));
-      networkError.value = !silent;
+    } catch (e) {
+      printERROR("Home Content not loaded: $e");
+      final fallbackLoaded = await _loadFallbackHome();
+      if (!fallbackLoaded) {
+        await Future.delayed(const Duration(seconds: 1));
+        networkError.value = !silent;
+      }
     }
   }
 
@@ -180,18 +250,22 @@ class HomeScreenController extends GetxController {
   ) {
     List contentTemp = [];
     for (var content in contents) {
-      if((content["contents"]).isEmpty) continue;
-      if ((content["contents"][0]).runtimeType == Playlist) {
+      if (content is! Map || content["contents"] is! List) continue;
+      final contentItems = (content["contents"] as List)
+          .where((item) => item != null)
+          .toList();
+      if (contentItems.isEmpty) continue;
+      if (contentItems[0].runtimeType == Playlist) {
         final tmp = PlaylistContent(
-            playlistList: (content["contents"]).whereType<Playlist>().toList(),
-            title: content["title"]);
+            playlistList: contentItems.whereType<Playlist>().toList(),
+            title: content["title"] ?? 'Playlists');
         if (tmp.playlistList.length >= 2) {
           contentTemp.add(tmp);
         }
-      } else if ((content["contents"][0]).runtimeType == Album) {
+      } else if (contentItems[0].runtimeType == Album) {
         final tmp = AlbumContent(
-            albumList: (content["contents"]).whereType<Album>().toList(),
-            title: content["title"]);
+            albumList: contentItems.whereType<Album>().toList(),
+            title: content["title"] ?? 'Albums');
         if (tmp.albumList.length >= 2) {
           contentTemp.add(tmp);
         }
@@ -203,10 +277,22 @@ class HomeScreenController extends GetxController {
   Future<void> changeDiscoverContent(dynamic val, {String? songId}) async {
     QuickPicks? quickPicks_;
     if (val == 'QP') {
-      final homeContentListMap = await _musicServices.getHome(limit: 3);
-      quickPicks_ = QuickPicks(
-          List<MediaItem>.from(homeContentListMap[0]["contents"]),
-          title: homeContentListMap[0]["title"]);
+      try {
+        final homeContentListMap = await _musicServices.getHome(limit: 3);
+        if (homeContentListMap.isNotEmpty &&
+            homeContentListMap[0]["contents"] is List &&
+            (homeContentListMap[0]["contents"] as List).isNotEmpty) {
+          quickPicks_ = QuickPicks(
+              List<MediaItem>.from(homeContentListMap[0]["contents"]),
+              title: homeContentListMap[0]["title"]);
+        } else {
+          await _loadFallbackHome();
+          return;
+        }
+      } catch (e) {
+        await _loadFallbackHome();
+        return;
+      }
     } else if (val == "TMV" || val == 'TR') {
       try {
         final charts = await _musicServices.getCharts(val);
